@@ -28,7 +28,7 @@ abstract class BaseDemoActivity : FragmentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         immersive()
-        setContentView(R.layout.activity_demo)
+        setContentView(getLayoutId())
 
         requestDataAndAddToAdapter(false)
 
@@ -37,18 +37,20 @@ abstract class BaseDemoActivity : FragmentActivity() {
         slidable_layout.setAdapter(createAdapter(dataList))
     }
 
+    protected open fun getLayoutId() = R.layout.activity_demo
+
     /**
      * 全屏
      */
     private fun immersive() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.KITKAT) {
             window.decorView.systemUiVisibility =
-                View.SYSTEM_UI_FLAG_FULLSCREEN or
-                View.SYSTEM_UI_FLAG_LAYOUT_STABLE or
-                View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY or
-                View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION or
-                View.SYSTEM_UI_FLAG_HIDE_NAVIGATION or
-                View.SYSTEM_UI_FLAG_LOW_PROFILE
+                    View.SYSTEM_UI_FLAG_FULLSCREEN or
+                    View.SYSTEM_UI_FLAG_LAYOUT_STABLE or
+                    View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY or
+                    View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION or
+                    View.SYSTEM_UI_FLAG_HIDE_NAVIGATION or
+                    View.SYSTEM_UI_FLAG_LOW_PROFILE
         }
         requestWindowFeature(Window.FEATURE_NO_TITLE)
         window.addFlags(WindowManager.LayoutParams.FLAG_FULLSCREEN)
@@ -59,17 +61,17 @@ abstract class BaseDemoActivity : FragmentActivity() {
      */
     private fun initRefreshLayout() {
         refresh_layout
-            .setEnableNestedScroll(true)
-            .setEnableRefresh(true)
-            .setEnableLoadMore(true)
-            .setRefreshHeader(ClassicsHeader(this))
-            .setRefreshFooter(ClassicsFooter(this))
-            .setOnRefreshListener {
-                requestDataAndAddToAdapter(true, 1000L)
-            }
-            .setOnLoadMoreListener {
-                requestDataAndAddToAdapter(false, 1000L)
-            }
+                .setEnableNestedScroll(true)
+                .setEnableRefresh(true)
+                .setEnableLoadMore(true)
+                .setRefreshHeader(ClassicsHeader(this))
+                .setRefreshFooter(ClassicsFooter(this))
+                .setOnRefreshListener {
+                    requestDataAndAddToAdapter(true, 1000L)
+                }
+                .setOnLoadMoreListener {
+                    requestDataAndAddToAdapter(false, 1000L)
+                }
     }
 
     private fun requestDataAndAddToAdapter(insertToFirst: Boolean = true, delayMills: Long = 0L) {
@@ -90,7 +92,7 @@ abstract class BaseDemoActivity : FragmentActivity() {
     protected abstract fun createAdapter(data: SimpleQueue<PageInfo>): SlideAdapter<out SlideViewHolder>
 
     private class SimpleListQueue<Element>(
-        private val actual: MutableList<Element> = mutableListOf()
+            private val actual: MutableList<Element> = mutableListOf()
     ) : SimpleQueue<Element>, List<Element> by actual {
 
         private var curIdx = 0
@@ -129,7 +131,7 @@ abstract class BaseDemoActivity : FragmentActivity() {
                 curIdx = idx
             } else {
                 throw IndexOutOfBoundsException("index must between 0 and ${actual.size} " +
-                    "but now is $idx")
+                        "but now is $idx")
             }
         }
     }

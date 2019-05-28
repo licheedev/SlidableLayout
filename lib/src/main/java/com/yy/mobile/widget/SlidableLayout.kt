@@ -13,12 +13,7 @@ import android.support.v4.view.ViewCompat
 import android.support.v4.view.ViewCompat.TYPE_NON_TOUCH
 import android.util.AttributeSet
 import android.util.Log
-import android.view.GestureDetector
-import android.view.LayoutInflater
-import android.view.MotionEvent
-import android.view.View
-import android.view.ViewConfiguration
-import android.view.ViewGroup
+import android.view.*
 import android.view.animation.Interpolator
 import android.widget.FrameLayout
 import android.widget.Scroller
@@ -36,7 +31,7 @@ import kotlin.LazyThreadSafetyMode.NONE
  * 可以对 [Fragment] 进行上下滑，参考 [SlideFragmentAdapter]。
  *
  */
-class SlidableLayout : FrameLayout, NestedScrollingChild2 {
+open class SlidableLayout : FrameLayout, NestedScrollingChild2 {
 
     constructor(context: Context) : super(context)
 
@@ -47,9 +42,9 @@ class SlidableLayout : FrameLayout, NestedScrollingChild2 {
     companion object {
         private const val DEBUG = true
 
-        private const val MIN_FLING_VELOCITY = 400 // dips
-
-        const val MAX_DURATION = 600 //最大滑行时间ms
+//        private const val MIN_FLING_VELOCITY = 400 // dips
+//
+//        const val MAX_DURATION = 600 //最大滑行时间ms
 
         private val sInterpolator = Interpolator { t ->
             val f = t - 1.0f
@@ -57,23 +52,34 @@ class SlidableLayout : FrameLayout, NestedScrollingChild2 {
         }
     }
 
-    private val mMinFlingSpeed: Float //定义滑动速度足够快的标准
+    protected val mMinFlingSpeed: Float //定义滑动速度足够快的标准
 
-    private val childHelper = NestedScrollingChildHelper(this)
+    protected val childHelper = NestedScrollingChildHelper(this)
 
-    private val mTouchSlop: Int
+    protected val mTouchSlop: Int
+
+
+    /**
+     * 滑行时间，默认600
+     */
+    var slideDuration = 600 
+    /**
+     * 滑行速度，400（dpi)
+     */
+    var flingVelocity = 400;
+    
 
     init {
         val configuration = ViewConfiguration.get(context)
         mTouchSlop = configuration.scaledPagingTouchSlop
 
         val density = context.resources.displayMetrics.density
-        mMinFlingSpeed = MIN_FLING_VELOCITY * density
+        mMinFlingSpeed = flingVelocity * density
 
         isNestedScrollingEnabled = true
     }
 
-    private enum class State(val flag: Int) {
+    protected enum class State(val flag: Int) {
         /**
          * 静止状态
          */
@@ -104,7 +110,7 @@ class SlidableLayout : FrameLayout, NestedScrollingChild2 {
         FLING_PREV(Mask.FLING or Mask.PREV);
 
         infix fun satisfy(mask: Int): Boolean =
-            flag and mask == mask
+                flag and mask == mask
 
         companion object {
 
@@ -115,7 +121,7 @@ class SlidableLayout : FrameLayout, NestedScrollingChild2 {
         }
     }
 
-    private object Mask {
+    protected object Mask {
         const val IDLE = 0x000001
         const val NEXT = 0x000010
         const val PREV = 0x000100
@@ -124,218 +130,230 @@ class SlidableLayout : FrameLayout, NestedScrollingChild2 {
         const val REJECT = 0x100000
     }
 
-    private var mState = State.of(Mask.IDLE)
+    protected var mState = State.of(Mask.IDLE)
 
-    private val mInflater by lazy(NONE) { LayoutInflater.from(context) }
+    protected val mInflater by lazy(NONE) { LayoutInflater.from(context) }
 
-    private val mScroller = Scroller(context, sInterpolator)
-    private var mAnimator: ValueAnimator? = null
+    protected val mScroller = Scroller(context, sInterpolator)
+    protected var mAnimator: ValueAnimator? = null
 
-    private var mViewHolderDelegate: ViewHolderDelegate<out SlideViewHolder>? = null
+    protected var mViewHolderDelegate: ViewHolderDelegate<out SlideViewHolder>? = null
 
-    private val mCurrentView: View?
+    protected val mCurrentView: View?
         get() = mViewHolderDelegate?.currentViewHolder?.view
 
-    private val mBackupView: View?
+    protected val mBackupView: View?
         get() = mViewHolderDelegate?.backupViewHolder?.view
 
-    private var downY = 0f
-    private var downX = 0f
+    protected var downY = 0f
+    protected var downX = 0f
 
-    private var mScrollConsumed: IntArray = IntArray(2)
-    private var mScrollOffset: IntArray = IntArray(2)
+    protected var mScrollConsumed: IntArray = IntArray(2)
+    protected var mScrollOffset: IntArray = IntArray(2)
 
-    private val mGestureCallback = object : GestureDetector.SimpleOnGestureListener() {
 
-        override fun onScroll(
-            e1: MotionEvent?, e2: MotionEvent,
-            distanceX: Float, distanceY: Float
-        ): Boolean {
-            if (mState satisfy Mask.FLING) {
-                return waitForFling(distanceX, distanceY)
-            }
-            val topView = mCurrentView ?: return false
-            val delegate = mViewHolderDelegate
-                ?: return false
-            val adapter = delegate.adapter
+    protected abstract class MyGestureListener : GestureDetector.SimpleOnGestureListener() {
 
-            var dyFromDownY = e2.y - downY
-            var dxFromDownX = e2.x - downX
-            val direction = when {
-                dyFromDownY < 0 -> SlideDirection.Next
-                dyFromDownY > 0 -> SlideDirection.Prev
-                else -> SlideDirection.Origin
-            }
+        abstract fun onUp(velocityX: Float = 0f, velocityY: Float = 0f): Boolean
 
-            val startToMove = mState satisfy Mask.IDLE &&
-                Math.abs(dyFromDownY) > 2 * Math.abs(dxFromDownX)
-            val changeDirectionToNext = mState satisfy Mask.PREV && dyFromDownY < 0
-            val changeDirectionToPrev = mState satisfy Mask.NEXT && dyFromDownY > 0
-
-            var dx = distanceX.toInt()
-            var dy = distanceY.toInt()
-            if (dispatchNestedPreScroll(dx, dy, mScrollConsumed, mScrollOffset)) {
-                dx -= mScrollConsumed[0]
-                dy -= mScrollConsumed[1]
-                dxFromDownX -= mScrollConsumed[0]
-                dyFromDownY -= mScrollConsumed[1]
-            }
-
-            if (startToMove) {
-                requestParentDisallowInterceptTouchEvent()
-            }
-
-            if (startToMove || changeDirectionToNext || changeDirectionToPrev) {
-                val directionMask =
-                    if (direction == SlideDirection.Next) Mask.NEXT else Mask.PREV
-
-                if (!adapter.canSlideTo(direction)) {
-                    mState = State.of(directionMask, Mask.SLIDE, Mask.REJECT)
-                } else {
-                    mState = State.of(directionMask, Mask.SLIDE)
-                    delegate.prepareBackup(direction)
-                }
-                log("onMove state = $mState, start = $startToMove, " +
-                    "changeToNext = $changeDirectionToNext, changeToPrev = $changeDirectionToPrev")
-            }
-            if (mState satisfy Mask.REJECT) {
-                return dispatchNestedScroll(0, 0, dx, dy, mScrollOffset)
-
-            } else if (mState satisfy Mask.SLIDE) {
-                val backView = mBackupView ?: return false
-                topView.y = dyFromDownY
-                backView.y =
-                    if (mState satisfy Mask.NEXT) dyFromDownY + measuredHeight
-                    else dyFromDownY - measuredHeight
-                return dispatchNestedScroll(0, dy, dx, 0, mScrollOffset)
-            }
-            return false
-        }
-
-        override fun onFling(
-            e1: MotionEvent?, e2: MotionEvent,
-            velocityX: Float, velocityY: Float
-        ): Boolean {
-            log("onFling ${e2.action} vY = $velocityY state = $mState")
-            onUp(velocityX, velocityY)
-            return true
-        }
-
-        fun onUp(velocityX: Float = 0f, velocityY: Float = 0f): Boolean {
-            if (!(mState satisfy Mask.SLIDE)) {
-                stopNestedScroll()
-                return false
-            }
-
-            val topView = mCurrentView ?: return resetTouch()
-            val currentOffsetY = topView.y.toInt()
-            // if state is reject, don't consume the fling.
-            val consumedFling = !(mState satisfy Mask.REJECT) || currentOffsetY != 0
-            if (!dispatchNestedPreFling(velocityX, velocityY)) {
-                dispatchNestedFling(velocityX, velocityY, consumedFling)
-            }
-            stopNestedScroll()
-
-            val backView = mBackupView ?: return resetTouch()
-            val delegate = mViewHolderDelegate
-                ?: return resetTouch()
-            var direction: SlideDirection? = null
-            var duration: Int? = null
-
-            val widgetHeight = measuredHeight
-            if (consumedFling) {
-                var dy: Int? = null
-                val highSpeed = Math.abs(velocityY) >= mMinFlingSpeed
-                val sameDirection = (mState == State.SLIDE_NEXT && velocityY < 0) ||
-                    (mState == State.SLIDE_PREV && velocityY > 0)
-                val moveLongDistance = Math.abs(currentOffsetY) > widgetHeight / 3
-                if ((highSpeed && sameDirection) || (!highSpeed && moveLongDistance)) { //fling
-                    if (mState == State.SLIDE_NEXT) {
-                        direction = SlideDirection.Next
-                        dy = -currentOffsetY - widgetHeight
-                    } else if (mState == State.SLIDE_PREV) {
-                        direction = SlideDirection.Prev
-                        dy = widgetHeight - currentOffsetY
-                    }
-                } else { //back to origin
-                    direction = SlideDirection.Origin
-                    dy = -currentOffsetY
-                }
-
-                if (dy != null) {
-                    duration = calculateDuration(velocityY, widgetHeight, dy)
-                    mScroller.startScroll(0, currentOffsetY, 0, dy, duration)
-                }
-            }
-
-            if (direction != null && duration != null) { //perform fling animation
-                mAnimator?.cancel()
-                mAnimator = ValueAnimator.ofFloat(1f).apply {
-                    setDuration(duration.toLong())
-                    addUpdateListener {
-                        if (mScroller.computeScrollOffset()) {
-                            val offset = mScroller.currY.toFloat()
-                            topView.y = offset
-                            backView.y =
-                                if (mState == State.FLING_NEXT) offset + widgetHeight
-                                else offset - widgetHeight
-                        }
-                    }
-                    addListener(object : AnimatorListenerAdapter() {
-
-                        override fun onAnimationCancel(animation: Animator?) =
-                            onAnimationEnd(animation)
-
-                        override fun onAnimationEnd(animation: Animator?) {
-                            if (direction != SlideDirection.Origin) {
-                                delegate.swap()
-                            }
-                            delegate.onDismissBackup(direction)
-                            mState = State.of(Mask.IDLE)
-                            if (direction != SlideDirection.Origin) {
-                                delegate.onCompleteCurrent(direction)
-                            }
-                            delegate.finishSlide(direction)
-                        }
-                    })
-                    start()
-                }
-
-                val directionMask = if (mState satisfy Mask.NEXT) Mask.NEXT else Mask.PREV
-                mState = State.of(directionMask, Mask.FLING)
-                return true
-            } else {
-                return resetTouch()
-            }
-        }
-
-        private fun resetTouch(): Boolean {
-            mState = State.of(Mask.IDLE)
-            mBackupView?.let(::removeView)
-            return false
-        }
-
-        override fun onDown(e: MotionEvent): Boolean {
-            downY = e.y
-            downX = e.x
-            startNestedScroll(ViewCompat.SCROLL_AXIS_VERTICAL)
-            return true
-        }
-
-        private fun waitForFling(dx: Float, dy: Float): Boolean {
-            //eat all the dy
-            val unconsumedX = dx.toInt()
-            val consumedY = dy.toInt()
-            if (!dispatchNestedPreScroll(unconsumedX, consumedY, mScrollConsumed,
-                    mScrollOffset, TYPE_NON_TOUCH)) {
-                dispatchNestedScroll(0, consumedY, unconsumedX, 0,
-                    mScrollOffset, TYPE_NON_TOUCH)
-            }
-            return true
-        }
     }
 
-    private val gestureDetector = GestureDetector(context, mGestureCallback)
+    protected val mGestureCallback = getGestureCallback()
+
+    protected open fun getGestureCallback(): MyGestureListener =
+            object : MyGestureListener() {
+
+                override fun onScroll(
+                        e1: MotionEvent?, e2: MotionEvent,
+                        distanceX: Float, distanceY: Float
+                ): Boolean {
+                    if (mState satisfy Mask.FLING) {
+                        return waitForFling(distanceX, distanceY)
+                    }
+                    val topView = mCurrentView ?: return false
+                    val delegate = mViewHolderDelegate
+                            ?: return false
+                    val adapter = delegate.adapter
+
+                    var dyFromDownY = e2.y - downY
+                    var dxFromDownX = e2.x - downX
+                    val direction = when {
+                        dyFromDownY < 0 -> SlideDirection.Next
+                        dyFromDownY > 0 -> SlideDirection.Prev
+                        else -> SlideDirection.Origin
+                    }
+
+                    val startToMove = mState satisfy Mask.IDLE &&
+                            Math.abs(dyFromDownY) > 2 * Math.abs(dxFromDownX)
+                    val changeDirectionToNext = mState satisfy Mask.PREV && dyFromDownY < 0
+                    val changeDirectionToPrev = mState satisfy Mask.NEXT && dyFromDownY > 0
+
+                    var dx = distanceX.toInt()
+                    var dy = distanceY.toInt()
+                    if (dispatchNestedPreScroll(dx, dy, mScrollConsumed, mScrollOffset)) {
+                        dx -= mScrollConsumed[0]
+                        dy -= mScrollConsumed[1]
+                        dxFromDownX -= mScrollConsumed[0]
+                        dyFromDownY -= mScrollConsumed[1]
+                    }
+
+                    if (startToMove) {
+                        requestParentDisallowInterceptTouchEvent()
+                    }
+
+                    if (startToMove || changeDirectionToNext || changeDirectionToPrev) {
+                        val directionMask =
+                                if (direction == SlideDirection.Next) Mask.NEXT else Mask.PREV
+
+                        if (!adapter.canSlideTo(direction)) {
+                            mState = State.of(directionMask, Mask.SLIDE, Mask.REJECT)
+                        } else {
+                            mState = State.of(directionMask, Mask.SLIDE)
+                            delegate.prepareBackup(direction)
+                        }
+                        log("onMove state = $mState, start = $startToMove, " +
+                                "changeToNext = $changeDirectionToNext, changeToPrev = $changeDirectionToPrev")
+                    }
+                    if (mState satisfy Mask.REJECT) {
+                        return dispatchNestedScroll(0, 0, dx, dy, mScrollOffset)
+
+                    } else if (mState satisfy Mask.SLIDE) {
+                        val backView = mBackupView ?: return false
+                        topView.y = dyFromDownY
+                        backView.y =
+                                if (mState satisfy Mask.NEXT) dyFromDownY + measuredHeight
+                                else dyFromDownY - measuredHeight
+                        return dispatchNestedScroll(0, dy, dx, 0, mScrollOffset)
+                    }
+                    return false
+                }
+
+                override fun onFling(
+                        e1: MotionEvent?, e2: MotionEvent,
+                        velocityX: Float, velocityY: Float
+                ): Boolean {
+                    log("onFling ${e2.action} vY = $velocityY state = $mState")
+                    onUp(velocityX, velocityY)
+                    return true
+                }
+
+
+                override fun onUp(velocityX: Float, velocityY: Float): Boolean {
+                    if (!(mState satisfy Mask.SLIDE)) {
+                        stopNestedScroll()
+                        return false
+                    }
+
+                    val topView = mCurrentView ?: return resetTouch()
+                    val currentOffsetY = topView.y.toInt()
+                    // if state is reject, don't consume the fling.
+                    val consumedFling = !(mState satisfy Mask.REJECT) || currentOffsetY != 0
+                    if (!dispatchNestedPreFling(velocityX, velocityY)) {
+                        dispatchNestedFling(velocityX, velocityY, consumedFling)
+                    }
+                    stopNestedScroll()
+
+                    val backView = mBackupView ?: return resetTouch()
+                    val delegate = mViewHolderDelegate
+                            ?: return resetTouch()
+                    var direction: SlideDirection? = null
+                    var duration: Int? = null
+
+                    val widgetHeight = measuredHeight
+                    if (consumedFling) {
+                        var dy: Int? = null
+                        val highSpeed = Math.abs(velocityY) >= mMinFlingSpeed
+                        val sameDirection = (mState == State.SLIDE_NEXT && velocityY < 0) ||
+                                (mState == State.SLIDE_PREV && velocityY > 0)
+                        val moveLongDistance = Math.abs(currentOffsetY) > widgetHeight / 3
+                        if ((highSpeed && sameDirection) || (!highSpeed && moveLongDistance)) { //fling
+                            if (mState == State.SLIDE_NEXT) {
+                                direction = SlideDirection.Next
+                                dy = -currentOffsetY - widgetHeight
+                            } else if (mState == State.SLIDE_PREV) {
+                                direction = SlideDirection.Prev
+                                dy = widgetHeight - currentOffsetY
+                            }
+                        } else { //back to origin
+                            direction = SlideDirection.Origin
+                            dy = -currentOffsetY
+                        }
+
+                        if (dy != null) {
+                            duration = calculateDuration(velocityY, widgetHeight, dy)
+                            mScroller.startScroll(0, currentOffsetY, 0, dy, duration)
+                        }
+                    }
+
+                    if (direction != null && duration != null) { //perform fling animation
+                        mAnimator?.cancel()
+                        mAnimator = ValueAnimator.ofFloat(1f).apply {
+                            setDuration(duration.toLong())
+                            addUpdateListener {
+                                if (mScroller.computeScrollOffset()) {
+                                    val offset = mScroller.currY.toFloat()
+                                    topView.y = offset
+                                    backView.y =
+                                            if (mState == State.FLING_NEXT) offset + widgetHeight
+                                            else offset - widgetHeight
+                                }
+                            }
+                            addListener(object : AnimatorListenerAdapter() {
+
+                                override fun onAnimationCancel(animation: Animator?) =
+                                        onAnimationEnd(animation)
+
+                                override fun onAnimationEnd(animation: Animator?) {
+                                    if (direction != SlideDirection.Origin) {
+                                        delegate.swap()
+                                    }
+                                    delegate.onDismissBackup(direction)
+                                    mState = State.of(Mask.IDLE)
+                                    if (direction != SlideDirection.Origin) {
+                                        delegate.onCompleteCurrent(direction)
+                                    }
+                                    delegate.finishSlide(direction)
+                                }
+                            })
+                            start()
+                        }
+
+                        val directionMask = if (mState satisfy Mask.NEXT) Mask.NEXT else Mask.PREV
+                        mState = State.of(directionMask, Mask.FLING)
+                        return true
+                    } else {
+                        return resetTouch()
+                    }
+                }
+
+                private fun resetTouch(): Boolean {
+                    mState = State.of(Mask.IDLE)
+                    mBackupView?.let(::removeView)
+                    return false
+                }
+
+                override fun onDown(e: MotionEvent): Boolean {
+                    downY = e.y
+                    downX = e.x
+                    startNestedScroll(ViewCompat.SCROLL_AXIS_VERTICAL)
+                    return true
+                }
+
+                private fun waitForFling(dx: Float, dy: Float): Boolean {
+                    //eat all the dy
+                    val unconsumedX = dx.toInt()
+                    val consumedY = dy.toInt()
+                    if (!dispatchNestedPreScroll(unconsumedX, consumedY, mScrollConsumed,
+                                    mScrollOffset, TYPE_NON_TOUCH)) {
+                        dispatchNestedScroll(0, consumedY, unconsumedX, 0,
+                                mScrollOffset, TYPE_NON_TOUCH)
+                    }
+                    return true
+                }
+            }
+
+
+    protected val gestureDetector = GestureDetector(context, mGestureCallback)
 
     @SuppressLint("ClickableViewAccessibility")
     override fun onTouchEvent(event: MotionEvent): Boolean {
@@ -343,7 +361,7 @@ class SlidableLayout : FrameLayout, NestedScrollingChild2 {
         if (gestureDetector.onTouchEvent(event)) {
             return true
         } else if (action == MotionEvent.ACTION_UP
-            || action == MotionEvent.ACTION_CANCEL) {
+                || action == MotionEvent.ACTION_CANCEL) {
             log("onUp $action state = $mState")
             if (mGestureCallback.onUp()) {
                 return true
@@ -382,7 +400,7 @@ class SlidableLayout : FrameLayout, NestedScrollingChild2 {
     }
 
     // just like ViewPager
-    private fun calculateDuration(velocity: Float, maxDistance: Int, currentDistance: Int): Int {
+    protected fun calculateDuration(velocity: Float, maxDistance: Int, currentDistance: Int): Int {
 
         // We want the duration of the page snap animation to be influenced by the distance that
         // the screen has to travel, however, we don't want this duration to be effected in a
@@ -401,13 +419,13 @@ class SlidableLayout : FrameLayout, NestedScrollingChild2 {
 
         val v = Math.abs(velocity)
         val duration: Int =
-            if (v > 0) {
-                4 * Math.round(1000 * Math.abs(distance / v))
-            } else {
-                val pageDelta = Math.abs(currentDistance).toFloat() / maxDistance
-                ((pageDelta + 1f) * 100).toInt()
-            }
-        return Math.min(duration, MAX_DURATION)
+                if (v > 0) {
+                    4 * Math.round(1000 * Math.abs(distance / v))
+                } else {
+                    val pageDelta = Math.abs(currentDistance).toFloat() / maxDistance
+                    ((pageDelta + 1f) * 100).toInt()
+                }
+        return Math.min(duration, slideDuration)
     }
 
     private fun requestParentDisallowInterceptTouchEvent() {
@@ -433,37 +451,37 @@ class SlidableLayout : FrameLayout, NestedScrollingChild2 {
     override fun stopNestedScroll() = childHelper.stopNestedScroll()
 
     override fun dispatchNestedScroll(
-        dxConsumed: Int, dyConsumed: Int,
-        dxUnconsumed: Int, dyUnconsumed: Int,
-        offsetInWindow: IntArray?, type: Int
+            dxConsumed: Int, dyConsumed: Int,
+            dxUnconsumed: Int, dyUnconsumed: Int,
+            offsetInWindow: IntArray?, type: Int
     ) = childHelper.dispatchNestedScroll(dxConsumed, dyConsumed, dxUnconsumed,
-        dyUnconsumed, offsetInWindow, type)
+            dyUnconsumed, offsetInWindow, type)
 
     override fun dispatchNestedScroll(
-        dxConsumed: Int, dyConsumed: Int,
-        dxUnconsumed: Int, dyUnconsumed: Int,
-        offsetInWindow: IntArray?
+            dxConsumed: Int, dyConsumed: Int,
+            dxUnconsumed: Int, dyUnconsumed: Int,
+            offsetInWindow: IntArray?
     ) = childHelper.dispatchNestedScroll(dxConsumed, dyConsumed,
-        dxUnconsumed, dyUnconsumed, offsetInWindow)
+            dxUnconsumed, dyUnconsumed, offsetInWindow)
 
     override fun dispatchNestedPreScroll(
-        dx: Int, dy: Int, consumed: IntArray?,
-        offsetInWindow: IntArray?, type: Int
+            dx: Int, dy: Int, consumed: IntArray?,
+            offsetInWindow: IntArray?, type: Int
     ) = childHelper.dispatchNestedPreScroll(dx, dy, consumed, offsetInWindow, type)
 
     override fun dispatchNestedPreScroll(
-        dx: Int, dy: Int, consumed: IntArray?,
-        offsetInWindow: IntArray?
+            dx: Int, dy: Int, consumed: IntArray?,
+            offsetInWindow: IntArray?
     ) = childHelper.dispatchNestedPreScroll(dx, dy, consumed, offsetInWindow)
 
     override fun dispatchNestedFling(velocityX: Float, velocityY: Float, consumed: Boolean) =
-        childHelper.dispatchNestedFling(velocityX, velocityY, consumed)
+            childHelper.dispatchNestedFling(velocityX, velocityY, consumed)
 
     override fun dispatchNestedPreFling(velocityX: Float, velocityY: Float) =
-        childHelper.dispatchNestedPreFling(velocityX, velocityY)
+            childHelper.dispatchNestedPreFling(velocityX, velocityY)
 
     @Suppress("ConstantConditionIf")
-    private fun log(str: String) {
+    protected fun log(str: String) {
         if (DEBUG) Log.i("SlidableLayout", str)
     }
 
@@ -486,12 +504,12 @@ class SlidableLayout : FrameLayout, NestedScrollingChild2 {
      *
      * @return true 表示开始滑动
      */
-    fun slideTo(direction: SlideDirection): Boolean {
+    open fun slideTo(direction: SlideDirection): Boolean {
         if (direction != SlideDirection.Origin &&
-            mState satisfy Mask.IDLE) {
+                mState satisfy Mask.IDLE) {
 
             val delegate = mViewHolderDelegate
-                ?: return false
+                    ?: return false
             val adapter = delegate.adapter
 
             startNestedScroll(ViewCompat.SCROLL_AXIS_VERTICAL, TYPE_NON_TOUCH)
@@ -499,17 +517,17 @@ class SlidableLayout : FrameLayout, NestedScrollingChild2 {
 
             //模拟在该方向上，以 mockSpeed 的速度滑行
             val directionMask =
-                if (direction == SlideDirection.Prev) Mask.PREV else Mask.NEXT
+                    if (direction == SlideDirection.Prev) Mask.PREV else Mask.NEXT
             val mockSpeed =
-                if (direction == SlideDirection.Prev) mMinFlingSpeed else -mMinFlingSpeed
+                    if (direction == SlideDirection.Prev) mMinFlingSpeed else -mMinFlingSpeed
 
             mState =
-                if (adapter.canSlideTo(direction)) {
-                    delegate.prepareBackup(direction)
-                    State.of(directionMask, Mask.SLIDE)
-                } else {
-                    State.of(directionMask, Mask.SLIDE, Mask.REJECT)
-                }
+                    if (adapter.canSlideTo(direction)) {
+                        delegate.prepareBackup(direction)
+                        State.of(directionMask, Mask.SLIDE)
+                    } else {
+                        State.of(directionMask, Mask.SLIDE, Mask.REJECT)
+                    }
 
             val canSlide = !(mState satisfy Mask.REJECT)
             log("Auto slide to $direction" + if (canSlide) "" else " but reject")
@@ -520,13 +538,13 @@ class SlidableLayout : FrameLayout, NestedScrollingChild2 {
     }
 
     @Deprecated(
-        message = "Use slideTo(direction) instead.",
-        replaceWith = ReplaceWith("slideTo(direction)"))
+            message = "Use slideTo(direction) instead.",
+            replaceWith = ReplaceWith("slideTo(direction)"))
     fun slideTo(direction: SlideDirection, duration: Int) =
-        slideTo(direction)
+            slideTo(direction)
 
-    private inner class ViewHolderDelegate<ViewHolder : SlideViewHolder>(
-        val adapter: SlideAdapter<ViewHolder>
+    protected inner class ViewHolderDelegate<ViewHolder : SlideViewHolder>(
+            val adapter: SlideAdapter<ViewHolder>
     ) {
 
         var currentViewHolder: ViewHolder? = null
@@ -543,10 +561,10 @@ class SlidableLayout : FrameLayout, NestedScrollingChild2 {
         }
 
         fun prepareCurrent(direction: SlideDirection) =
-            currentViewHolder.prepare(direction).also { currentViewHolder = it }
+                currentViewHolder.prepare(direction).also { currentViewHolder = it }
 
         fun prepareBackup(direction: SlideDirection) =
-            backupViewHolder.prepare(direction).also { backupViewHolder = it }
+                backupViewHolder.prepare(direction).also { backupViewHolder = it }
 
         fun onCompleteCurrent(direction: SlideDirection, isInit: Boolean = false) {
             currentViewHolder?.let {
