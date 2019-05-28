@@ -152,6 +152,8 @@ class DemoFragment : Fragment(), SlidableUI {
         // 如果使用的是Support包，添加以下依赖
         implementation 'com.github.YvesCheung:SlidableLayout:1.0.4'
         //implementation "com.android.support:support-fragment:$support_version"
+        // 带水平方向上的，HorizontalSlidableLayout
+        implementation 'com.github.licheedev:SlidableLayout:1.0.4h'
         
         // AndroidX
         // 如果使用的是AndroidX，添加以下依赖
