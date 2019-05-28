@@ -1,5 +1,6 @@
 package com.yy.mobile.slidablelayout
 
+import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
 import android.view.View
@@ -24,6 +25,11 @@ class DemoForAutoSlide : BaseDemoActivity() {
 
     private val handler = Handler(Looper.getMainLooper())
 
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+        slidable_layout.scrollable = true
+    }
+    
     /**
      * 视图出现的两秒后，自动滑到下一个视图
      */

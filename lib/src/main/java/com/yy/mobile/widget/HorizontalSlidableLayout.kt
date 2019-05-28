@@ -230,8 +230,18 @@ class HorizontalSlidableLayout : SlidableLayout, NestedScrollingChild2 {
             }
 
 
+    override fun onTouchEvent(event: MotionEvent): Boolean {
+        if (!scrollable) return false // 判断是否禁止滑动
+        
+        return super.onTouchEvent(event)
+    }
+    
+
     // 已修改
     override fun onInterceptTouchEvent(event: MotionEvent): Boolean {
+        
+        if (!scrollable) return false // 判断是否禁止滑动
+        
         val action = event.action and MotionEvent.ACTION_MASK
         log("onInterceptTouchEvent action = $action, state = $mState")
         var intercept = false
