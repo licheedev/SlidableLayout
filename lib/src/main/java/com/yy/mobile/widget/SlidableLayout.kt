@@ -79,6 +79,10 @@ open class SlidableLayout : FrameLayout, NestedScrollingChild2 {
         mMinFlingSpeed = flingVelocity * density
 
         isNestedScrollingEnabled = true
+
+        // 修复属性动画缩放时间不正常的问题
+        ValueAnimatorUtil.resetDurationScale()
+
     }
 
     protected enum class State(val flag: Int) {
@@ -361,7 +365,7 @@ open class SlidableLayout : FrameLayout, NestedScrollingChild2 {
     override fun onTouchEvent(event: MotionEvent): Boolean {
 
         if (!scrollable) return false // 判断是否禁止滑动
-        
+
         val action = event.action and MotionEvent.ACTION_MASK
         if (gestureDetector.onTouchEvent(event)) {
             return true
@@ -378,7 +382,7 @@ open class SlidableLayout : FrameLayout, NestedScrollingChild2 {
     override fun onInterceptTouchEvent(event: MotionEvent): Boolean {
 
         if (!scrollable) return false // 判断是否禁止滑动
-        
+
         val action = event.action and MotionEvent.ACTION_MASK
         log("onInterceptTouchEvent action = $action, state = $mState")
         var intercept = false
